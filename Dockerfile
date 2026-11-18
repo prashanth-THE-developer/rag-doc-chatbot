@@ -6,31 +6,26 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# ---------- Stage 2: Python backend ----------
+# ---------- Stage 2: light Python backend ----------
 FROM python:3.11-slim
 
-# Hugging Face runs containers as a normal user, so we create one with writable folders
-RUN useradd -m -u 1000 user && \
-    mkdir -p /home/user/app/data /home/user/app/faiss_index && \
-    chown -R user:user /home/user
-USER user
-ENV HOME=/home/user PATH=/home/user/.local/bin:$PATH
-WORKDIR /home/user/app
+# FAISS needs the OpenMP library, which the slim image may not include
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install the CPU-only PyTorch first (much smaller than the default download)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+WORKDIR /app
 
-# Install the rest of our libraries
-COPY --chown=user requirements.txt .
+# Install our Python libraries (no PyTorch anymore)
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download the embedding model now, so the first request is not slow
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-
 # Copy our backend code and the built frontend
-COPY --chown=user app ./app
-COPY --chown=user --from=frontend-build /frontend/dist ./frontend/dist
+COPY app ./app
+COPY --from=frontend-build /frontend/dist ./frontend/dist
 
-# Hugging Face expects the app on port 7860
-EXPOSE 7860
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# Folders the app writes to
+RUN mkdir -p data faiss_index
+
+# Render tells us which port to use in the PORT variable (default 10000)
+EXPOSE 10000
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]

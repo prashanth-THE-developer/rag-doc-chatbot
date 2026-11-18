@@ -1,15 +1,27 @@
-import os                                   # for working with folders and file paths
+import os                                   # for folders and file paths
 import sys                                  # to read what the user types after the script name
 import json                                 # to save/load our chunks as a JSON file
+import time                                 # to wait a little when the API says "slow down"
 import numpy as np                          # FAISS needs numbers in a numpy array
 import faiss                                # the vector search library
-from sentence_transformers import SentenceTransformer   # the embedding model
+from dotenv import load_dotenv              # reads the .env file
+from google import genai                    # the Gemini SDK
+from google.genai import types              # settings objects for the embedding call
 
 from app.loader import load_pdf             # our function that reads a PDF
 from app.chunker import chunk_pages         # our function that splits pages into chunks
 
-# Name of the free embedding model; it turns text into 384 numbers
-MODEL_NAME = "all-MiniLM-L6-v2"
+# Read .env so GEMINI_API_KEY and GEMINI_EMBED_MODEL are available
+load_dotenv()
+
+# Embedding model name comes from .env, so we can change it without touching the code
+EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001")
+
+# We ask Gemini for 768 numbers per text: smaller and faster than the default 3072
+EMBED_DIM = 768
+
+# How many texts we send to Gemini in one request
+BATCH_SIZE = 50
 
 # Folder where we save the index so we don't rebuild it every time
 INDEX_DIR = "faiss_index"
@@ -18,16 +30,62 @@ INDEX_DIR = "faiss_index"
 INDEX_PATH = os.path.join(INDEX_DIR, "index.faiss")
 CHUNKS_PATH = os.path.join(INDEX_DIR, "chunks.json")
 
-# We keep the model in this variable so it is loaded only once (loading is slow)
-_model = None
+# We keep the client here so it is created only once
+_client = None
 
 
-def get_model():
-    """Load the embedding model the first time, then reuse it."""
-    global _model                           # we want to change the variable defined above
-    if _model is None:                      # only load if not loaded yet
-        _model = SentenceTransformer(MODEL_NAME)   # first run downloads about 90 MB
-    return _model                           # give the model back
+def get_client():
+    """Create the Gemini client the first time, then reuse it."""
+    global _client                                   # we want to change the variable above
+    if _client is None:
+        api_key = os.getenv("GEMINI_API_KEY")        # read the key from .env
+        if not api_key:                              # stop early with a clear message
+            raise ValueError("GEMINI_API_KEY not found. Check your .env file.")
+        _client = genai.Client(api_key=api_key)
+    return _client
+
+
+def embed_texts(texts, task_type):
+    """Turn a list of texts into normalized vectors using the Gemini embedding API.
+    task_type is RETRIEVAL_DOCUMENT for chunks and RETRIEVAL_QUERY for questions."""
+
+    vectors = []                                     # all vectors will be collected here
+
+    # Go through the texts in batches so one request is not too big
+    for start in range(0, len(texts), BATCH_SIZE):
+        batch = texts[start:start + BATCH_SIZE]      # the current group of texts
+
+        # Try up to 4 times, because the free tier can say "too many requests"
+        for attempt in range(4):
+            try:
+                result = get_client().models.embed_content(
+                    model=EMBED_MODEL,
+                    contents=batch,
+                    config=types.EmbedContentConfig(
+                        task_type=task_type,                 # tells Gemini how we will use the vectors
+                        output_dimensionality=EMBED_DIM,     # 768 numbers per text
+                    ),
+                )
+                break                                        # success: stop retrying
+            except Exception as e:
+                too_many = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+                # Give up on the last attempt or on any error that is not a rate limit
+                if attempt == 3 or not too_many:
+                    raise
+                time.sleep(5 * (2 ** attempt))               # wait 5s, 10s, 20s, then retry
+
+        # Collect the numbers of each embedding in this batch
+        vectors.extend([emb.values for emb in result.embeddings])
+
+    # Convert to a float32 numpy array, which FAISS needs
+    arr = np.array(vectors, dtype="float32")
+
+    # Gemini does not normalize vectors when we use fewer than 3072 dimensions,
+    # so we do it ourselves: make every vector length 1
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    arr = arr / np.maximum(norms, 1e-12)                     # max() avoids dividing by zero
+
+    return arr
 
 
 def build_index(chunks):
@@ -36,22 +94,19 @@ def build_index(chunks):
     # Take only the text part of every chunk
     texts = [c["text"] for c in chunks]
 
-    # Convert all texts to vectors; normalize_embeddings=True makes each vector length 1
-    embeddings = get_model().encode(texts, normalize_embeddings=True)
+    # Convert all chunk texts to vectors
+    embeddings = embed_texts(texts, "RETRIEVAL_DOCUMENT")
 
-    # FAISS wants float32 numbers in a numpy array
-    embeddings = np.array(embeddings, dtype="float32")
-
-    # dimension = how many numbers each vector has (384 for this model)
+    # dimension = how many numbers each vector has (768 here)
     dimension = embeddings.shape[1]
 
-    # Create an empty index that compares vectors using inner product (= cosine here)
+    # Create an empty index that compares vectors using inner product (= cosine for normalized vectors)
     index = faiss.IndexFlatIP(dimension)
 
     # Put all our chunk vectors into the index
     index.add(embeddings)
 
-    # Make sure the folder to save into exists (does nothing if it already exists)
+    # Make sure the folder to save into exists
     os.makedirs(INDEX_DIR, exist_ok=True)
 
     # Save the FAISS index to disk
@@ -89,9 +144,8 @@ def search(question, k=3):
     # Load the saved index and chunks
     index, chunks = load_index()
 
-    # Convert the question into a vector in the same way as the chunks
-    q_vec = get_model().encode([question], normalize_embeddings=True)
-    q_vec = np.array(q_vec, dtype="float32")
+    # Convert the question into a vector, marked as a QUERY
+    q_vec = embed_texts([question], "RETRIEVAL_QUERY")
 
     # Never ask for more results than the number of chunks we have
     k = min(k, len(chunks))
@@ -104,7 +158,7 @@ def search(question, k=3):
     for score, i in zip(scores[0], ids[0]):
         chunk = dict(chunks[i])             # copy the chunk so we don't change the original
         chunk["score"] = float(score)       # add the similarity score (higher = closer)
-        results.append(chunk)               # add to results
+        results.append(chunk)
 
     # Give back the best chunks, best first
     return results

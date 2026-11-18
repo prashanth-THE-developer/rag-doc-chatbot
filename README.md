@@ -1,12 +1,3 @@
----
-title: DocuMind AI
-colorFrom: indigo
-colorTo: purple
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # DocuMind AI: RAG Document Chatbot
 
 ![App screenshot](docs/screenshot.jpg)
@@ -17,7 +8,7 @@ Upload a PDF and ask questions about it. The app finds the most relevant parts o
 ## How it works
 
 1. **Ingest:** the PDF is read page by page and split into small overlapping chunks.
-2. **Embed:** each chunk is converted into a vector with `sentence-transformers` (`all-MiniLM-L6-v2`).
+2. **Embed:** each chunk is converted into a 768-number vector with the Gemini embedding API (gemini-embedding-001)
 3. **Index:** the vectors are stored in a FAISS index for fast similarity search.
 4. **Retrieve:** the question is embedded and the 5 closest chunks are found.
 5. **Generate:** the question and the chunks go to Gemini, with rules to answer only from the context.
@@ -28,7 +19,7 @@ Upload a PDF and ask questions about it. The app finds the most relevant parts o
 |---|---|
 | Frontend | React, Vite, plain CSS |
 | Backend | Python, FastAPI, Uvicorn |
-| Retrieval | sentence-transformers, FAISS, pypdf |
+| Gemini Embeddings API, FAISS, pypdf |
 | LLM | Google Gemini API |
 
 ## Features
@@ -73,6 +64,7 @@ Create a `.env` file (copy `.env.example`) and add your free key from https://ai
 ```
 GEMINI_API_KEY=your_key_here
 GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_EMBED_MODEL=gemini-embedding-001
 ```
 
 Start the server:
