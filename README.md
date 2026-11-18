@@ -3,6 +3,9 @@
 ![App screenshot](docs/screenshot.jpg)
 
 Upload a PDF and ask questions about it. The app finds the most relevant parts of the document and uses an LLM to write an answer from them only. If the answer is not in the document, it says so instead of making something up.
+**Live demo:** https://documind-ai-wpgr.onrender.com
+
+> Hosted on a free tier: the first load can take 30-60 seconds to wake up, and the uploaded document is cleared whenever the service sleeps. Please upload a PDF again if you see "No document indexed yet".
 
 
 ## How it works
@@ -98,6 +101,7 @@ Open http://localhost:5173
 - One document at a time: a new upload replaces the previous index
 - Scanned PDFs are not supported (OCR would be needed)
 - Planned: multiple documents, streaming answers, deployment
+- Free hosting: the service sleeps after inactivity and has limited CPU, so large PDFs are slow
 
 ## Author
 
