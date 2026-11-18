@@ -1,0 +1,9 @@
+venv
+.env
+data
+faiss_index
+frontend/node_modules
+frontend/dist
+.git
+__pycache__
+docs

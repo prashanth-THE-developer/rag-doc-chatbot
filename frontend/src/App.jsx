@@ -2,7 +2,9 @@ import { useState, useRef, useEffect } from "react";   // React tools for state 
 import "./App.css";                                    // our styles
 
 // Address of our FastAPI server (it must be running)
-const API_URL = "http://127.0.0.1:8000";
+// In development (npm run dev) call the backend on port 8000.
+// In the deployed build, frontend and backend share one address, so we use "".
+const API_URL = import.meta.env.DEV ? "http://127.0.0.1:8000" : "";
 
 // Quick questions shown as clickable chips
 const SUGGESTIONS = [

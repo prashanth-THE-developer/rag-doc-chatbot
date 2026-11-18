@@ -1,3 +1,12 @@
+---
+title: DocuMind AI
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # DocuMind AI: RAG Document Chatbot
 
 ![App screenshot](docs/screenshot.jpg)
@@ -88,7 +97,7 @@ Open http://localhost:5173
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/` | Health check |
+|GET /health | `/` | Health check |
 | POST | `/upload` | Upload a PDF, then chunk, embed and index it |
 | POST | `/ask` | Body: `{"question": "...", "k": 5}`. Returns the answer and sources |
 

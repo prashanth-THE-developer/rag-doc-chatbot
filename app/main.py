@@ -8,6 +8,7 @@ from app.loader import load_pdf                  # reads a PDF
 from app.chunker import chunk_pages              # splits pages into chunks
 from app.vectorstore import build_index          # embeds chunks and saves the FAISS index
 from app.rag import answer_question              # retrieve + ask Gemini
+from fastapi.staticfiles import StaticFiles      # lets FastAPI serve the built React files
 
 # Create the app; the title shows up in the auto-generated docs page
 app = FastAPI(title="RAG Doc Chatbot")
@@ -31,7 +32,7 @@ class AskRequest(BaseModel):
     k: int = 5             # how many chunks to retrieve (optional, default 5)
 
 
-@app.get("/")
+@app.get("/health")
 def home():
     """Health check: confirms the server is running."""
     return {"status": "ok", "message": "RAG Doc Chatbot API is running"}
@@ -90,3 +91,7 @@ def ask(req: AskRequest):
     except Exception as e:
         # Any other problem (for example a Gemini error) becomes a clear 500 error
         raise HTTPException(status_code=500, detail=str(e))
+    # Serve the built React app (created by "npm run build") at the root address
+FRONTEND_DIR = os.path.join("frontend", "dist")
+if os.path.isdir(FRONTEND_DIR):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
